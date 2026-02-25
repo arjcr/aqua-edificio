@@ -233,7 +233,7 @@
       </div>
       <div class="section-title">Lecturas del mes</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Unidad</th><th>Valor (m³)</th><th>Consumo</th><th>Foto</th><th>Notas</th><th></th></tr></thead>
+        <thead><tr><th>Unidad</th><th>Valor (m³)</th><th>Consumo</th><th>Foto</th><th>Notas</th><th></th><th></th></tr></thead>
         <tbody id="reg-table"></tbody>
       </table></div>
     </div>
@@ -248,8 +248,9 @@
       </div>
       <div class="table-wrap" id="dist-container"><div style="padding:2rem;text-align:center;color:var(--muted)">Selecciona mes y monto para calcular</div></div>
       <div style="margin-top:1rem;display:flex;gap:.75rem;flex-wrap:wrap">
-        <button class="btn" id="export-btn" style="display:none">📄 Exportar TXT</button>
-        <button class="btn btn-ghost" id="share-btn" style="display:none">🔗 Copiar link reporte</button>
+        <button class="btn btn-ghost" id="export-btn" style="display:none">📄 TXT</button>
+        <button class="btn btn-green" id="export-pdf-btn" style="display:none">📋 Exportar PDF</button>
+        <button class="btn btn-ghost" id="share-btn" style="display:none">🔗 Copiar link</button>
       </div>
     </div>
 
@@ -319,6 +320,25 @@
     </div>
 
   </div><!-- /app -->
+
+  <!-- MODAL EDICIÓN -->
+  <div id="modal-edit" style="display:none;position:fixed;inset:0;background:rgba(10,15,26,.88);z-index:9998;align-items:center;justify-content:center;backdrop-filter:blur(4px)">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2rem;width:90%;max-width:480px;position:relative">
+      <div style="font-family:var(--font-display);font-size:1.1rem;font-weight:700;margin-bottom:1.25rem">✏️ Editar Lectura</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:1rem" id="edit-info"></div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div class="field"><label>VALOR EN M³</label><input type="number" id="edit-valor" step="0.01" min="0"/></div>
+        <div class="field"><label>NOTAS</label><input type="text" id="edit-notas" placeholder="Opcional"/></div>
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem;color:var(--muted);margin-bottom:1.25rem">
+        ℹ️ El valor anterior quedará registrado en el historial de cambios
+      </div>
+      <div style="display:flex;gap:.75rem;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="closeEditModal()">Cancelar</button>
+        <button class="btn btn-green" id="edit-save-btn">💾 Guardar cambio</button>
+      </div>
+    </div>
+  </div>
 </main>
 
 <div class="loading-overlay" id="loading">
@@ -333,7 +353,7 @@
 //  CONFIGURACIÓN — completar después de crear proyecto en
 //  Google Cloud Console (ver INSTRUCCIONES-DRIVE.md)
 // ═══════════════════════════════════════════════════════════
-const CLIENT_ID    = '1074398752440-bcs0rvqkqs4clja6d849gjdafkhll5n8.apps.googleusercontent.com';
+const CLIENT_ID    = 'TU_CLIENT_ID.apps.googleusercontent.com';
 const FOLDER_NAME  = 'AquaEdificio';
 const DATA_FILE    = 'aquaedificio-data.json';
 // ═══════════════════════════════════════════════════════════
@@ -592,6 +612,7 @@ function renderRegistroTable(){
       <td style="font-family:var(--font-mono)">${c!=null?c.toFixed(2)+' m³':'—'}</td>
       <td>${fh}</td>
       <td style="color:var(--muted);font-size:.85rem">${l.notas||'—'}</td>
+      <td><button class="btn btn-ghost" style="padding:.3rem .6rem;font-size:.75rem;color:var(--accent);border-color:var(--accent)" onclick="openEditModal('${un.id}','${mes}')">✏️</button></td>
       <td><button class="btn btn-ghost" style="padding:.3rem .6rem;font-size:.75rem" onclick="borrarLectura('${un.id}','${mes}')">✕</button></td></tr>`;
   });
   if(!any) tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1.5rem">No hay lecturas para este mes</td></tr>';
@@ -631,6 +652,69 @@ async function borrarLectura(uid,mes){
   if(!Object.keys(state.lecturas[mes]||{}).length) delete state.lecturas[mes];
   await saveData(); renderAll();
 }
+
+// ── EDICIÓN DE LECTURAS ───────────────────────────────
+let editCtx = {uid:null, mes:null};
+
+function openEditModal(uid, mes){
+  const l = state.lecturas[mes]?.[uid]; if(!l) return;
+  const un = state.config.unidades.find(x=>x.id===uid);
+  editCtx = {uid, mes};
+  document.getElementById('edit-info').innerHTML =
+    `<strong>${un?.nombre||uid}</strong> — ${ml(mes)}<br>Valor actual: <span style="color:var(--accent);font-family:var(--font-mono)">${l.valor} m³</span>`;
+  document.getElementById('edit-valor').value = l.valor;
+  document.getElementById('edit-notas').value = l.notas||'';
+  const modal = document.getElementById('modal-edit');
+  modal.style.display='flex';
+}
+
+function closeEditModal(){
+  document.getElementById('modal-edit').style.display='none';
+  editCtx = {uid:null, mes:null};
+}
+
+document.getElementById('edit-save-btn').addEventListener('click', async()=>{
+  const {uid, mes} = editCtx;
+  if(!uid||!mes) return;
+  const nuevoValor = parseFloat(document.getElementById('edit-valor').value);
+  const nuevasNotas = document.getElementById('edit-notas').value;
+  if(isNaN(nuevoValor)){ toast('Ingresa un valor válido','red'); return; }
+
+  const lecturaActual = state.lecturas[mes]?.[uid];
+  const valorAnterior = lecturaActual?.valor;
+
+  // Guardar historial de cambios en la misma lectura
+  const cambio = {
+    valorAnterior,
+    valorNuevo: nuevoValor,
+    ts: new Date().toISOString(),
+    usuario: currentUser.nombre
+  };
+  const histCambios = lecturaActual?.histCambios || [];
+  histCambios.push(cambio);
+
+  loading(true,'Guardando cambio...');
+  try {
+    state.lecturas[mes][uid] = {
+      ...lecturaActual,
+      valor: nuevoValor,
+      notas: nuevasNotas,
+      ts: new Date().toISOString(),
+      usuario: currentUser.nombre,
+      histCambios
+    };
+    await saveData();
+    closeEditModal();
+    toast('✓ Lectura actualizada');
+    renderAll();
+  } catch(e){ toast('Error: '+e.message,'red'); }
+  finally { loading(false); }
+});
+
+// Cerrar modal al hacer clic fuera
+document.getElementById('modal-edit').addEventListener('click', function(e){
+  if(e.target===this) closeEditModal();
+});
 
 // ── DISTRIBUCIÓN ──────────────────────────────────────────
 function calcDist(){
@@ -721,6 +805,108 @@ document.getElementById('export-btn').addEventListener('click',()=>{
   const b=new Blob([`DISTRIBUCIÓN DE AGUA — ${ml(mes)}\n${'='.repeat(40)}\n${txt}`],{type:'text/plain;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`distribucion-${mes}.txt`; a.click();
 });
+
+document.getElementById('export-pdf-btn').addEventListener('click',()=>{
+  const mes = document.getElementById('dist-mes').value;
+  const contenido = document.getElementById('dist-container').innerHTML;
+  const fv = state.facturas[mes];
+  const edificio = state.config.nombre;
+
+  const win = window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html lang="es"><head>
+  <meta charset="UTF-8">
+  <title>Distribución Agua — ${ml(mes)}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;color:#1a1a2e;padding:2rem;font-size:13px;}
+    .header{text-align:center;border-bottom:3px solid #00d4ff;padding-bottom:1rem;margin-bottom:1.5rem;}
+    .header h1{font-size:1.5rem;font-weight:800;color:#0a0f1a;}
+    .header h2{font-size:1rem;color:#6b7a99;margin-top:.25rem;}
+    .header .mes{font-size:1.1rem;font-weight:700;color:#00d4ff;margin-top:.35rem;}
+    .summary{display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;}
+    .summary-card{flex:1;min-width:100px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:.75rem;text-align:center;}
+    .summary-card .lbl{font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7a99;}
+    .summary-card .val{font-size:1.1rem;font-weight:700;margin-top:.2rem;font-family:monospace;}
+    table{width:100%;border-collapse:collapse;margin-bottom:1rem;}
+    th{background:#0a0f1a;color:#fff;padding:.6rem .9rem;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;}
+    td{padding:.7rem .9rem;border-bottom:1px solid #e2e8f0;font-size:.85rem;}
+    tr:nth-child(even) td{background:#f8fafc;}
+    .monto{font-family:monospace;font-weight:700;font-size:1rem;color:#059669;text-align:right;}
+    .consumo{font-family:monospace;color:#0095ff;text-align:right;}
+    .pct{font-family:monospace;color:#6b7a99;font-size:.8rem;text-align:right;}
+    .sub{font-size:.72rem;color:#6b7a99;margin-top:.15rem;}
+    .total-row{background:#f0fdf4 !important;font-weight:700;}
+    .total-row td{border-top:2px solid #059669;}
+    .footer{margin-top:1.5rem;text-align:center;font-size:.72rem;color:#6b7a99;border-top:1px solid #e2e8f0;padding-top:1rem;}
+    .bar-bg{background:#e2e8f0;height:6px;border-radius:99px;overflow:hidden;width:80px;display:inline-block;vertical-align:middle;}
+    .bar-fill{height:100%;border-radius:99px;background:#00d4ff;}
+    @media print{body{padding:1rem;} .footer{position:fixed;bottom:0;width:100%;}}
+  </style></head><body>
+  <div class="header">
+    <h1>💧 ${edificio}</h1>
+    <h2>Distribución de Consumo de Agua</h2>
+    <div class="mes">${ml(mes)}</div>
+  </div>
+  <div id="pdf-content"></div>
+  <div class="footer">
+    Generado por AquaEdificio · ${new Date().toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
+  </div>
+  <script>
+    // Rebuild table from state data passed via URL params
+  </script>
+  </body></html>`);
+
+  // Build clean table inside the new window
+  const u = state.config.unidades;
+  const gen = u.find(x=>x.tipo==='general');
+  const remarcs = u.filter(x=>x.tipo==='remarc');
+  const gc = gen ? getConsumo(gen.id,mes) : null;
+  const fvNum = state.facturas[mes]||null;
+  const cpm = fvNum&&gc>0 ? fvNum/gc : (state.config.tarifa||0);
+  const rd = remarcs.map(r=>({...r,cons:getConsumo(r.id,mes)||0}));
+  const totalRemarc = rd.reduce((s,r)=>s+r.cons,0);
+  const diferencia = gc ? gc-totalRemarc : 0;
+  const pt = totalRemarc||1;
+
+  // Summary cards
+  let summaryHtml = \`<div class="summary">
+    <div class="summary-card"><div class="lbl">Medidor General</div><div class="val">\${gc?.toFixed(2)||'—'} m³</div></div>
+    <div class="summary-card"><div class="lbl">Total Remarcadores</div><div class="val">\${totalRemarc.toFixed(2)} m³</div></div>
+    <div class="summary-card"><div class="lbl">Diferencia</div><div class="val" style="color:\${Math.abs(diferencia)<1?'#059669':'#f59e0b'}">\${diferencia>=0?'+':''}\${diferencia.toFixed(2)} m³</div></div>
+    \${fvNum?'<div class="summary-card"><div class="lbl">Factura Total</div><div class="val" style="color:#059669">$'+Number(fvNum).toLocaleString('es-CL')+'</div></div>':''}
+    \${cpm?'<div class="summary-card"><div class="lbl">$/m³</div><div class="val">$'+cpm.toFixed(0)+'</div></div>':''}
+  </div>\`;
+
+  let totalCobros = 0;
+  let rowsHtml = '';
+  rd.forEach(r=>{
+    const peso = pt>0 ? r.cons/pt : 1/rd.length;
+    const cost = r.cons*cpm + diferencia*cpm*peso;
+    totalCobros += cost;
+    const pct = totalRemarc>0 ? (r.cons/totalRemarc*100).toFixed(1) : 0;
+    const barW = totalRemarc>0 ? Math.round(r.cons/totalRemarc*80) : 0;
+    rowsHtml += \`<tr>
+      <td><strong>\${r.nombre}</strong></td>
+      <td class="consumo">\${r.cons.toFixed(2)} m³</td>
+      <td class="pct"><div class="bar-bg"><div class="bar-fill" style="width:\${barW}px"></div></div> \${pct}%</td>
+      <td class="monto">\${cpm?'$'+Math.round(cost).toLocaleString('es-CL'):'—'}</td>
+    </tr>\`;
+  });
+
+  let tableHtml = \`<table>
+    <thead><tr><th>Departamento</th><th>Consumo (m³)</th><th>% del Total</th><th>Cobro ($)</th></tr></thead>
+    <tbody>\${rowsHtml}
+    <tr class="total-row">
+      <td colspan="3"><strong>TOTAL</strong></td>
+      <td class="monto">\${cpm?'$'+Math.round(totalCobros).toLocaleString('es-CL'):'—'}</td>
+    </tr>
+    </tbody>
+  </table>\`;
+
+  win.document.getElementById('pdf-content').innerHTML = summaryHtml + tableHtml;
+  win.document.close();
+  setTimeout(()=>win.print(), 400);
+});
 document.getElementById('share-btn').addEventListener('click',()=>{
   const url=location.href.split('?')[0]+'?rep='+document.getElementById('dist-mes').value;
   navigator.clipboard.writeText(url).then(()=>toast('🔗 Link copiado'));
@@ -749,7 +935,8 @@ function renderHistorial(){
       const gc=gen2?getConsumo(gen2.id,mes):null, fac=state.facturas[mes], cpm=fac&&gc?fac/gc:(state.config.tarifa||0);
       const fh=l.foto?`<a href="${l.foto}" target="_blank"><img src="${l.foto}" style="height:30px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"></a>`:'—';
       const nomHist=un.nombre.replace(/\s*\(independiente\)/i,'');
-      const tsHtml=`<div style="font-size:.78rem;color:var(--muted);white-space:nowrap">${fmtTs(l.ts)}</div>${l.usuario?`<div style="font-size:.72rem;color:var(--accent)">👤 ${l.usuario}</div>`:''}`;
+      const cambios = l.histCambios?.length ? `<div style="font-size:.7rem;color:var(--yellow);margin-top:.2rem">✏️ ${l.histCambios.length} edición${l.histCambios.length>1?'es':''}</div>` : '';
+      const tsHtml=`<div style="font-size:.78rem;color:var(--muted);white-space:nowrap">${fmtTs(l.ts)}</div>${l.usuario?`<div style="font-size:.72rem;color:var(--accent)">👤 ${l.usuario}</div>`:''}${cambios}`;
       tb.innerHTML+=`<tr><td><span class="badge badge-blue">${ml(mes)}</span></td><td>${nomHist}</td>
         <td style="font-family:var(--font-mono)">${l.valor} m³</td>
         <td style="font-family:var(--font-mono);color:var(--accent)">${c!=null?c.toFixed(2)+' m³':'—'}</td>
