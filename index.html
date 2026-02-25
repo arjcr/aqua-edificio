@@ -174,10 +174,18 @@
 
     <!-- DASHBOARD -->
     <div id="panel-dashboard" class="panel active">
-      <div class="month-selector">
-        <button class="month-btn" id="btn-prev">◀</button>
-        <div class="month-current" id="monthLabel">—</div>
-        <button class="month-btn" id="btn-next">▶</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1.5rem">
+        <div class="month-selector" style="margin-bottom:0">
+          <button class="month-btn" id="btn-prev">◀</button>
+          <div class="month-current" id="monthLabel">—</div>
+          <button class="month-btn" id="btn-next">▶</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.82rem;color:var(--muted);user-select:none">
+          <div class="toggle-wrap" id="toggle-d11" onclick="toggleIndep()" style="width:36px;height:20px;background:var(--border);border-radius:99px;position:relative;cursor:pointer;transition:.2s">
+            <div id="toggle-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:.2s"></div>
+          </div>
+          Mostrar Depto 11
+        </label>
       </div>
       <div class="cards-grid">
         <div class="card"><div class="card-icon">🔵</div><div class="card-label">Consumo General</div><div class="card-value" id="dash-general">— m³</div><div class="card-sub" id="dash-general-sub">Sin lectura</div></div>
@@ -253,7 +261,7 @@
         <div class="chart-bars" id="chart-bars"></div>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Mes</th><th>Unidad</th><th>Lectura (m³)</th><th>Consumo</th><th>Costo Est.</th><th>Foto</th></tr></thead>
+        <thead><tr><th>Mes</th><th>Unidad</th><th>Lectura (m³)</th><th>Consumo</th><th>Costo Est.</th><th>Registrado</th><th>Foto</th></tr></thead>
         <tbody id="hist-table"></tbody>
       </table></div>
     </div>
@@ -325,12 +333,13 @@
 //  CONFIGURACIÓN — completar después de crear proyecto en
 //  Google Cloud Console (ver INSTRUCCIONES-DRIVE.md)
 // ═══════════════════════════════════════════════════════════
-const CLIENT_ID    = '1074398752440-bcs0rvqkqs4clja6d849gjdafkhll5n8.apps.googleusercontent.com';
+const CLIENT_ID    = 'TU_CLIENT_ID.apps.googleusercontent.com';
 const FOLDER_NAME  = 'AquaEdificio';
 const DATA_FILE    = 'aquaedificio-data.json';
 // ═══════════════════════════════════════════════════════════
 
 let state = { config:{nombre:'Mi Edificio',tarifa:0,unidades:[]}, lecturas:{}, facturas:{} };
+let currentUser = {nombre:'', email:''};
 let currentMonth = new Date().toISOString().slice(0,7);
 let fotoFile=null, fotoBase64=null;
 let token=null, folderId=null, fotosFolderId=null, dataFileId=null;
@@ -391,6 +400,7 @@ async function onLoggedIn(){
   loading(true,'Conectando con Google Drive...');
   try {
     const u=await gf('https://www.googleapis.com/oauth2/v2/userinfo');
+    currentUser={nombre:u.given_name||u.name||'Usuario',email:u.email||''};
     document.getElementById('user-avatar').src=u.picture;
     document.getElementById('user-avatar').style.display='block';
     document.getElementById('btn-logout').style.display='inline-flex';
@@ -524,6 +534,18 @@ document.getElementById('btn-next').addEventListener('click',()=>{ const d=new D
 function renderAll(){ renderDashboard(); renderRegistroTable(); renderUnidadSelect(); renderHistorial(); renderConfig(); }
 
 // ── DASHBOARD ─────────────────────────────────────────────
+let mostrarIndep = true;
+function toggleIndep(){
+  mostrarIndep=!mostrarIndep;
+  const knob=document.getElementById('toggle-knob'), wrap=document.getElementById('toggle-d11');
+  if(mostrarIndep){
+    knob.style.left='2px'; knob.style.background='var(--muted)'; wrap.style.background='var(--border)';
+  } else {
+    knob.style.left='18px'; knob.style.background='var(--accent)'; wrap.style.background='rgba(0,212,255,.25)';
+  }
+  renderDashboard();
+}
+
 function renderDashboard(){
   const u=state.config.unidades,m=currentMonth;
   const gen=u.find(x=>x.tipo==='general'),comun=u.find(x=>x.tipo==='comun'),indep=u.find(x=>x.tipo==='indep');
@@ -538,8 +560,11 @@ function renderDashboard(){
   const tipos={general:'<span class="badge badge-blue">General</span>',comun:'<span class="badge badge-yellow">Común</span>',indep:'<span class="badge badge-green">Independiente</span>',remarc:'<span class="badge" style="background:rgba(255,255,255,.06);color:var(--muted)">Remarcador</span>'};
   const tb=document.getElementById('estado-table'); tb.innerHTML='';
   u.forEach(un=>{
+    if(un.tipo==='indep' && !mostrarIndep) return; // filtro toggle
+    // Nombre limpio: sin "(Independiente)"
+    const nombreMostrar = un.nombre.replace(/\s*\(independiente\)/i,'');
     const l=state.lecturas[m]?.[un.id], p=getPrev(un.id,m), c=getConsumo(un.id,m);
-    tb.innerHTML+=`<tr><td><strong>${un.nombre}</strong></td><td>${tipos[un.tipo]||''}</td>
+    tb.innerHTML+=`<tr><td><strong>${nombreMostrar}</strong></td><td>${tipos[un.tipo]||''}</td>
       <td style="font-family:var(--font-mono);color:var(--muted)">${p!=null?p+' m³':'—'}</td>
       <td style="font-family:var(--font-mono)">${l?l.valor+' m³':'<span style="color:var(--muted)">—</span>'}</td>
       <td style="font-family:var(--font-mono);color:var(--accent)">${c!=null?c.toFixed(2)+' m³':'—'}</td>
@@ -561,7 +586,8 @@ function renderRegistroTable(){
     const l=state.lecturas[mes]?.[un.id]; if(!l)return; any=true;
     const c=getConsumo(un.id,mes);
     const fh=l.foto?`<a href="${l.foto}" target="_blank"><img src="${l.foto}" style="height:36px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"></a>`:'<span style="color:var(--muted);font-size:.8rem">Sin foto</span>';
-    tb.innerHTML+=`<tr><td><strong>${un.nombre}</strong></td>
+    const nomReg=un.nombre.replace(/\s*\(independiente\)/i,'');
+    tb.innerHTML+=`<tr><td><strong>${nomReg}</strong></td>
       <td style="font-family:var(--font-mono);color:var(--accent)">${l.valor} m³</td>
       <td style="font-family:var(--font-mono)">${c!=null?c.toFixed(2)+' m³':'—'}</td>
       <td>${fh}</td>
@@ -584,7 +610,8 @@ document.getElementById('save-lectura-btn').addEventListener('click',async()=>{
     let fotoUrl=null;
     if(fotoFile){ loading(true,'Subiendo foto a Drive...'); fotoUrl=await uploadFoto(fotoFile,uid,mes); }
     if(!state.lecturas[mes]) state.lecturas[mes]={};
-    state.lecturas[mes][uid]={valor,notas,foto:fotoUrl};
+    const ahora=new Date();
+    state.lecturas[mes][uid]={valor,notas,foto:fotoUrl,ts:ahora.toISOString(),usuario:currentUser.nombre};
     await saveData(); toast('✓ Guardado en Drive');
     document.getElementById('reg-valor').value=''; document.getElementById('reg-notas').value='';
     fotoFile=null; fotoBase64=null; document.getElementById('foto-input').value='';
@@ -653,6 +680,12 @@ document.getElementById('share-btn').addEventListener('click',()=>{
 });
 
 // ── HISTORIAL ─────────────────────────────────────────────
+function fmtTs(ts){
+  if(!ts) return '—';
+  const d=new Date(ts);
+  return d.toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
+}
+
 function renderHistorial(){
   const gen=state.config.unidades.find(x=>x.tipo==='general'), meses=sortedMonths().slice(-6);
   if(gen&&meses.length>1){
@@ -668,14 +701,17 @@ function renderHistorial(){
       const c=getConsumo(un.id,mes), gen2=state.config.unidades.find(x=>x.tipo==='general');
       const gc=gen2?getConsumo(gen2.id,mes):null, fac=state.facturas[mes], cpm=fac&&gc?fac/gc:(state.config.tarifa||0);
       const fh=l.foto?`<a href="${l.foto}" target="_blank"><img src="${l.foto}" style="height:30px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'"></a>`:'—';
-      tb.innerHTML+=`<tr><td><span class="badge badge-blue">${ml(mes)}</span></td><td>${un.nombre}</td>
+      const nomHist=un.nombre.replace(/\s*\(independiente\)/i,'');
+      const tsHtml=`<div style="font-size:.78rem;color:var(--muted);white-space:nowrap">${fmtTs(l.ts)}</div>${l.usuario?`<div style="font-size:.72rem;color:var(--accent)">👤 ${l.usuario}</div>`:''}`;
+      tb.innerHTML+=`<tr><td><span class="badge badge-blue">${ml(mes)}</span></td><td>${nomHist}</td>
         <td style="font-family:var(--font-mono)">${l.valor} m³</td>
         <td style="font-family:var(--font-mono);color:var(--accent)">${c!=null?c.toFixed(2)+' m³':'—'}</td>
         <td style="font-family:var(--font-mono);color:var(--green)">${(c&&cpm)?'$'+Math.round(c*cpm).toLocaleString('es-CL'):'—'}</td>
+        <td>${tsHtml}</td>
         <td>${fh}</td></tr>`;
     });
   });
-  if(!any) tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:2rem">Sin historial aún</td></tr>';
+  if(!any) tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem">Sin historial aún</td></tr>';
 }
 
 // ── REPORTE ───────────────────────────────────────────────
@@ -695,7 +731,7 @@ function genReporte(){
   let html=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem;margin-bottom:1.5rem">
     ${[['Total general',gc.toFixed(2)+' m³','var(--text)'],['Factura total',fv?'$'+Number(fv).toLocaleString('es-CL'):'—','var(--green)'],['$/m³',cpm?'$'+cpm.toFixed(0):'—','var(--accent)']].map(([l,v,c])=>`<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;text-align:center"><div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">${l}</div><div style="font-family:var(--font-mono);font-size:1.3rem;color:${c};margin-top:.25rem">${v}</div></div>`).join('')}
   </div><div class="section-title">Cobro por unidad</div>`;
-  if(indep&&ic>0) html+=`<div class="cobro-card"><div><div class="cobro-nombre">${indep.nombre}</div><div class="cobro-detalle">${ic.toFixed(2)} m³ × $${cpm.toFixed(0)}</div></div><div class="cobro-monto">$${Math.round(ic*cpm).toLocaleString('es-CL')}</div></div>`;
+  // Depto independiente no aparece en reporte del edificio
   rd.forEach(r=>{ const p=pt>0?r.cons/pt:1/rd.length, cost=r.cons*cpm+ccp*p;
     html+=`<div class="cobro-card"><div><div class="cobro-nombre">${r.nombre}</div><div class="cobro-detalle">${r.cons.toFixed(2)} m³ propio + parte proporcional comunes</div></div><div class="cobro-monto">$${Math.round(cost).toLocaleString('es-CL')}</div></div>`;
   });
